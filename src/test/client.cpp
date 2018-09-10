@@ -29,7 +29,6 @@
 #define COMPARE_ACTION(AC, EQ) strcmp(AC, EQ) == 0
 
 #define BASE_URL_REST_API "https://www.bitmex.com/api/v1"
-#define API_KEY "5Aclg5BdABg6xU2eF-Y0JT9t"
 #define ORDER_PATH "/api/v1/order"
 
 static const float QUANTITY = 10;
@@ -128,11 +127,25 @@ bool Client::GetLastData(const std::string& key, data* out) {
   return true;
 }
 
+void Client::ClearData(const std::string& key) {
+  std::lock_guard<std::recursive_mutex> lock(data_mutex_);
+  auto it = data_.find(key);
+  if (it == data_.end()) {
+    return;
+  }
+
+  if (it->second.empty()) {
+    return;
+  }
+  it->second.clear();
+}
+
 const std::string& Client::GetSymbol() const {
   return symbol_;
 }
 
-void Client::DoOffer(const std::string& secret_key,
+void Client::DoOffer(const std::string& public_key,
+                     const std::string& secret_key,
                      const data& dt,
                      const std::string& side,
                      common::time64_t cur_time) {
@@ -140,15 +153,10 @@ void Client::DoOffer(const std::string& secret_key,
     NOTREACHED();
   }
 
-  std::unique_lock<std::mutex> lock(offer_mutex_, std::try_to_lock);
-  if (offer_mutex_.try_lock()) {
-    return;
-  }
-
   try {
     std::shared_ptr<io::swagger::client::api::ApiConfiguration> conf(new io::swagger::client::api::ApiConfiguration);
     conf->setBaseUrl(BASE_URL_REST_API);
-    conf->setApiKey("api-key", API_KEY);
+    conf->setApiKey("api-key", public_key);
     std::string cur_time_str = common::ConvertToString(cur_time);
     conf->setApiKey("api-nonce", cur_time_str);
     std::string data_str = common::MemSPrintf(
@@ -166,7 +174,7 @@ void Client::DoOffer(const std::string& secret_key,
     # '1749cd2ccae4aa49048ae09f0b95110cee706e0944e6a14ad0b3a8cb45bd336b'
     signature = HEX(HMAC_SHA256(apiSecret, verb + path + str(expires) + data))*/
 
-    std::string signature = gen_signature(secret_key, message);
+    std::string signature = gen_signature(message, secret_key);
     conf->setApiKey("api-signature", signature);
     web::http::client::http_client_config hconf;
     hconf.set_validate_certificates(false);
@@ -188,7 +196,6 @@ void Client::DoOffer(const std::string& secret_key,
                              auto diff = resp_time - dt.timestamp;
                              auto ldiff = answ_time - cur_time;
                              INFO_LOG() << "Symbol " << dt.symbol << " exec: " << diff << " latency: " << ldiff;
-                             fflush(stdout);
                            }
                          })
                          .wait();
@@ -201,13 +208,7 @@ void Client::DoOffer(const std::string& secret_key,
     WARNING_LOG() << e.what();
   }
 
-  std::lock_guard<std::recursive_mutex> lock2(data_mutex_);
-  auto it = data_.find(QUOTE);
-  if (it == data_.end()) {
-    return;
-  }
-
-  it->second.clear();
+  fflush(stdout);
 }
 
 void Client::Run() {

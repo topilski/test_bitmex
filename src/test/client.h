@@ -34,12 +34,17 @@ class Client {
 
   data_array_t GetData(const std::string& key);
   bool GetLastData(const std::string& key, data* out);
+  void ClearData(const std::string& key);
 
   void Run();
 
   const std::string& GetSymbol() const;
 
-  void DoOffer(const std::string& secret_key, const data& dt, const std::string& side, common::time64_t cur_time);
+  void DoOffer(const std::string& public_key,
+               const std::string& secret_key,
+               const data& dt,
+               const std::string& side,
+               common::time64_t cur_time);
 
  private:
   static web::uri make_uri(const std::string& symbol);
@@ -52,5 +57,4 @@ class Client {
   const std::string symbol_;
   web::websockets::client::websocket_client ws_;
   ClientObserver* observer_;
-  std::mutex offer_mutex_;
 };

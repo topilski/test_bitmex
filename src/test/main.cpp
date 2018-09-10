@@ -7,7 +7,7 @@
 #define XBTUSD "XBTUSD"
 #define XBTU18 "XBTU18"
 
-#define DIFF 10
+#define DIFF 5
 
 static const std::string symbols[] = {XBTUSD, XBTU18};
 
@@ -15,9 +15,9 @@ enum { CLIENTS_COUNT = SIZEOFMASS(symbols) };
 
 class HandlerData : public Client::ClientObserver {
  public:
-  explicit HandlerData(const std::string& secret_key)
-      : xbtusd_client_(nullptr), xbtu18_client_(nullptr), secret_key_(secret_key) {}
-  ~HandlerData() {}
+  explicit HandlerData(const std::string& public_key, const std::string& secret_key)
+      : xbtusd_client_(nullptr), xbtu18_client_(nullptr), public_key_(public_key), secret_key_(secret_key) {}
+  virtual ~HandlerData() {}
 
   virtual void Notify(Client* client, const std::string& key) override {
     UNUSED(client);
@@ -34,18 +34,19 @@ class HandlerData : public Client::ClientObserver {
     std::lock_guard<std::mutex> lock(mutex_);
     if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
       int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
-      if (diff % 5 == 0) {
+      if (diff % DIFF == 0) {
         common::time64_t cur_time = common::time::current_utc_mstime();
         std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
-          xbtusd_client_->DoOffer(secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
+          xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
         });
         std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
-          xbtu18_client_->DoOffer(secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
+          xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
         });
         th1.join();
         th2.join();
+        xbtusd_client_->ClearData(key);
+        xbtu18_client_->ClearData(key);
       }
-      return;
     }
   }
 
@@ -64,20 +65,22 @@ class HandlerData : public Client::ClientObserver {
   Client* xbtu18_client_;
 
   std::mutex mutex_;
+  const std::string public_key_;
   const std::string secret_key_;
 };
 
 int main(int argc, char* argv[]) {
-  if (argc != 2) {
+  if (argc != 3) {
     return 1;
   }
 
-  const char* key = argv[1];
+  const std::string pub_key = argv[1];
+  const std::string priv_key = argv[2];
   common::logging::INIT_LOGGER(PROJECT_NAME, common::logging::LOG_LEVEL_INFO);
   web::websockets::client::websocket_client_config cfg;
   cfg.set_validate_certificates(false);
 
-  HandlerData* handler = new HandlerData(key);
+  HandlerData* handler = new HandlerData(pub_key, priv_key);
 
   Client* clients[CLIENTS_COUNT];
   std::thread threads[CLIENTS_COUNT];
