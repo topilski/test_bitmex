@@ -38,7 +38,7 @@ class HandlerData : public Client::ClientObserver {
         public_key_(public_key),
         secret_key_(secret_key),
         last_order_time_(0),
-        reverse_(false) {}
+        reverse_(0) {}
   virtual ~HandlerData() {}
 
   virtual void Finished() override {
@@ -74,9 +74,9 @@ class HandlerData : public Client::ClientObserver {
     data xbtu18_data;
     data xbtusd_data;
     if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
-      if (!reverse_) {
+      if (reverse_ != 2) {
         int diff = xbtusd_data.bid_price - xbtu18_data.ask_price;
-        if (diff % DIFF_1 == 0) {
+        if (diff == DIFF_1) {
           common::time64_t cur_time = common::time::current_utc_mstime();
           std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
             xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, cur_time);
@@ -87,13 +87,17 @@ class HandlerData : public Client::ClientObserver {
           xbtusd_client_->ClearData(key);
           xbtu18_client_->ClearData(key);
           last_order_time_ = common::time::current_utc_mstime();
-          reverse_ = true;
+          reverse_ = 2;
           th1.join();
           th2.join();
+          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
+          return;
         }
-      } else {
+      }
+
+      if (reverse_ != 1) {
         int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
-        if (diff % DIFF_2 == 0) {
+        if (diff == DIFF_2) {
           common::time64_t cur_time = common::time::current_utc_mstime();
           std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
             xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
@@ -104,12 +108,15 @@ class HandlerData : public Client::ClientObserver {
           xbtusd_client_->ClearData(key);
           xbtu18_client_->ClearData(key);
           last_order_time_ = common::time::current_utc_mstime();
-          reverse_ = false;
+          reverse_ = 1;
           th1.join();
           th2.join();
+          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
+          return;
         }
       }
-      INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
+
+      INFO_LOG() << "reverse: " << reverse_;
     }
   }
 
@@ -132,7 +139,7 @@ class HandlerData : public Client::ClientObserver {
   const std::string secret_key_;
   common::time64_t last_order_time_;
 
-  bool reverse_;
+  int reverse_;
 };
 
 int main(int argc, char* argv[]) {
