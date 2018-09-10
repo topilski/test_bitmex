@@ -74,8 +74,8 @@ class HandlerData : public Client::ClientObserver {
     data xbtu18_data;
     data xbtusd_data;
     if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
-      int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
       if (!reverse_) {
+        int diff = xbtusd_data.bid_price - xbtu18_data.ask_price;
         if (diff % DIFF_1 == 0) {
           common::time64_t cur_time = common::time::current_utc_mstime();
           std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
@@ -92,6 +92,7 @@ class HandlerData : public Client::ClientObserver {
           th2.join();
         }
       } else {
+        int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
         if (diff % DIFF_2 == 0) {
           common::time64_t cur_time = common::time::current_utc_mstime();
           std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
