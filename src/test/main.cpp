@@ -1,8 +1,10 @@
 #include <thread>
 
-#include "client.h"
+#include <iostream>
 
 #include <common/time.h>
+
+#include "client.h"
 
 #define XBTUSD "XBTUSD"
 #define XBTU18 "XBTU18"
@@ -10,6 +12,14 @@
 #define DIFF 5
 
 #define FREEZE_TIME_MSEC 30000
+
+#define HELP_TEXT            \
+  "Usage: " PROJECT_NAME     \
+  " [options]\n"             \
+  "  Bitmex " PROJECT_NAME   \
+  " project.\n\n"            \
+  "    argv[1] public key\n" \
+  "    argv[2] private key\n"
 
 static const std::string symbols[] = {XBTUSD, XBTU18};
 
@@ -25,7 +35,7 @@ class HandlerData : public Client::ClientObserver {
         last_order_time_(0) {}
   virtual ~HandlerData() {}
 
-  virtual void Finished() {
+  virtual void Finished() override {
     if (xbtusd_client_) {
       xbtusd_client_->Stop();
     }
@@ -99,6 +109,7 @@ class HandlerData : public Client::ClientObserver {
 
 int main(int argc, char* argv[]) {
   if (argc != 3) {
+    std::cout << HELP_TEXT << std::endl;
     return 1;
   }
 
