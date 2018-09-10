@@ -9,6 +9,8 @@
 
 #define DIFF 5
 
+#define FREEZE_TIME_MSEC 30000
+
 static const std::string symbols[] = {XBTUSD, XBTU18};
 
 enum { CLIENTS_COUNT = SIZEOFMASS(symbols) };
@@ -16,7 +18,11 @@ enum { CLIENTS_COUNT = SIZEOFMASS(symbols) };
 class HandlerData : public Client::ClientObserver {
  public:
   explicit HandlerData(const std::string& public_key, const std::string& secret_key)
-      : xbtusd_client_(nullptr), xbtu18_client_(nullptr), public_key_(public_key), secret_key_(secret_key) {}
+      : xbtusd_client_(nullptr),
+        xbtu18_client_(nullptr),
+        public_key_(public_key),
+        secret_key_(secret_key),
+        last_order_time_(0) {}
   virtual ~HandlerData() {}
 
   virtual void Finished() {
@@ -39,9 +45,18 @@ class HandlerData : public Client::ClientObserver {
       return;
     }
 
+    std::lock_guard<std::mutex> lock(mutex_);
+    common::time64_t lstime = common::time::current_utc_mstime();
+    auto skip_time = lstime - last_order_time_;
+    if (skip_time < FREEZE_TIME_MSEC) {
+      xbtusd_client_->ClearData(key);
+      xbtu18_client_->ClearData(key);
+      INFO_LOG() << "skip request: " << skip_time;
+      return;
+    }
+
     data xbtu18_data;
     data xbtusd_data;
-    std::lock_guard<std::mutex> lock(mutex_);
     if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
       int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
       if (diff % DIFF == 0) {
@@ -54,6 +69,7 @@ class HandlerData : public Client::ClientObserver {
         });
         xbtusd_client_->ClearData(key);
         xbtu18_client_->ClearData(key);
+        last_order_time_ = common::time::current_utc_mstime();
         th1.join();
         th2.join();
       }
@@ -78,6 +94,7 @@ class HandlerData : public Client::ClientObserver {
   std::mutex mutex_;
   const std::string public_key_;
   const std::string secret_key_;
+  common::time64_t last_order_time_;
 };
 
 int main(int argc, char* argv[]) {

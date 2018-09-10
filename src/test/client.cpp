@@ -207,8 +207,6 @@ void Client::DoOffer(const std::string& public_key,
   } catch (const web::websockets::client::websocket_exception& e) {
     WARNING_LOG() << "rest error: " << e.what();
   }
-
-  fflush(stdout);
 }
 
 void Client::Stop() {
