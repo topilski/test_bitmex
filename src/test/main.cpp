@@ -9,7 +9,12 @@
 #define XBTUSD "XBTUSD"
 #define XBTU18 "XBTU18"
 
-#define DIFF 5
+#define DIFF_1 5
+
+#define DIFF_2 3
+
+// short sell
+// long buy
 
 #define FREEZE_TIME_MSEC 30000
 
@@ -32,7 +37,8 @@ class HandlerData : public Client::ClientObserver {
         xbtu18_client_(nullptr),
         public_key_(public_key),
         secret_key_(secret_key),
-        last_order_time_(0) {}
+        last_order_time_(0),
+        reverse_(false) {}
   virtual ~HandlerData() {}
 
   virtual void Finished() override {
@@ -56,34 +62,53 @@ class HandlerData : public Client::ClientObserver {
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    common::time64_t lstime = common::time::current_utc_mstime();
+    /*common::time64_t lstime = common::time::current_utc_mstime();
     auto skip_time = lstime - last_order_time_;
     if (skip_time < FREEZE_TIME_MSEC) {
       xbtusd_client_->ClearData(key);
       xbtu18_client_->ClearData(key);
       INFO_LOG() << "skip request: " << skip_time;
       return;
-    }
+    }*/
 
     data xbtu18_data;
     data xbtusd_data;
     if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
       int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
-      if (diff % DIFF == 0) {
-        common::time64_t cur_time = common::time::current_utc_mstime();
-        std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
-          xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
-        });
-        std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
-          xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
-        });
-        xbtusd_client_->ClearData(key);
-        xbtu18_client_->ClearData(key);
-        last_order_time_ = common::time::current_utc_mstime();
-        th1.join();
-        th2.join();
+      if (!reverse_) {
+        if (diff % DIFF_1 == 0) {
+          common::time64_t cur_time = common::time::current_utc_mstime();
+          std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
+            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, cur_time);
+          });
+          std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, cur_time + 5);
+          });
+          xbtusd_client_->ClearData(key);
+          xbtu18_client_->ClearData(key);
+          last_order_time_ = common::time::current_utc_mstime();
+          reverse_ = true;
+          th1.join();
+          th2.join();
+        }
+      } else {
+        if (diff % DIFF_2 == 0) {
+          common::time64_t cur_time = common::time::current_utc_mstime();
+          std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
+            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
+          });
+          std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
+          });
+          xbtusd_client_->ClearData(key);
+          xbtu18_client_->ClearData(key);
+          last_order_time_ = common::time::current_utc_mstime();
+          reverse_ = false;
+          th1.join();
+          th2.join();
+        }
       }
-      INFO_LOG() << "diff: " << diff;
+      INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
     }
   }
 
@@ -105,6 +130,8 @@ class HandlerData : public Client::ClientObserver {
   const std::string public_key_;
   const std::string secret_key_;
   common::time64_t last_order_time_;
+
+  bool reverse_;
 };
 
 int main(int argc, char* argv[]) {
