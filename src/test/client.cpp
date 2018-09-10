@@ -32,7 +32,7 @@
 #define API_KEY "5Aclg5BdABg6xU2eF-Y0JT9t"
 #define ORDER_PATH "/api/v1/order"
 
-static const int QUANTITY = 10;
+static const float QUANTITY = 10;
 
 namespace {
 std::string gen_signature(const std::string& message, const std::string& secret) {
