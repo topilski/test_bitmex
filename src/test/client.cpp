@@ -31,7 +31,7 @@
 #define BASE_URL_REST_API "https://www.bitmex.com/api/v1"
 #define ORDER_PATH "/api/v1/order"
 
-static const float QUANTITY = 10;
+static const float kQuantity = 10.0;
 
 namespace {
 std::string gen_signature(const std::string& message, const std::string& secret) {
@@ -97,7 +97,7 @@ bool parse_data(json_object* obj, data_array_t* out) {
 Client::Client(const web::websockets::client::websocket_client_config& cfg,
                const std::string& symbol,
                ClientObserver* observer)
-    : data_mutex_(), data_(), symbol_(symbol), ws_(cfg), observer_(observer) {}
+    : data_mutex_(), data_(), symbol_(symbol), ws_(cfg), observer_(observer), stop_(false) {}
 
 Client::~Client() {}
 
@@ -148,7 +148,7 @@ void Client::DoOffer(const std::string& public_key,
                      const std::string& secret_key,
                      const data& dt,
                      const std::string& side,
-                     common::time64_t cur_time) {
+                     common::time64_t nonce) {
   if (dt.symbol != symbol_) {
     NOTREACHED();
   }
@@ -157,10 +157,10 @@ void Client::DoOffer(const std::string& public_key,
     std::shared_ptr<io::swagger::client::api::ApiConfiguration> conf(new io::swagger::client::api::ApiConfiguration);
     conf->setBaseUrl(BASE_URL_REST_API);
     conf->setApiKey("api-key", public_key);
-    std::string cur_time_str = common::ConvertToString(cur_time);
+    std::string cur_time_str = common::ConvertToString(nonce);
     conf->setApiKey("api-nonce", cur_time_str);
     std::string data_str = common::MemSPrintf(
-        "{\"ordType\":\"Market\",\"orderQty\":\"%.6f\",\"side\":\"%s\",\"symbol\":\"%s\"}", QUANTITY, side, dt.symbol);
+        "{\"ordType\":\"Market\",\"orderQty\":\"%.6f\",\"side\":\"%s\",\"symbol\":\"%s\"}", kQuantity, side, dt.symbol);
     std::string message = "POST" + std::string(ORDER_PATH) + cur_time_str + data_str;
 
     /*verb = 'POST'
@@ -182,74 +182,81 @@ void Client::DoOffer(const std::string& public_key,
     std::shared_ptr<io::swagger::client::api::ApiClient> cl(new io::swagger::client::api::ApiClient(conf));
     io::swagger::client::api::OrderApi order(cl);
     auto task = order.order_new(
-        dt.symbol, side, boost::optional<double>(), QUANTITY, boost::optional<double>(), boost::optional<double>(),
+        dt.symbol, side, boost::optional<double>(), kQuantity, boost::optional<double>(), boost::optional<double>(),
         boost::optional<double>(), boost::optional<utility::string_t>(), boost::optional<utility::string_t>(),
         boost::optional<double>(), boost::optional<utility::string_t>(), utility::string_t("Market"),
         boost::optional<utility::string_t>(), boost::optional<utility::string_t>(),
         boost::optional<utility::string_t>(), boost::optional<utility::string_t>());
-    auto than_task = task.then([dt, cur_time](std::shared_ptr<io::swagger::client::api::Order> ord) {
-                           common::time64_t answ_time = common::time::current_utc_mstime();
-                           auto ts = ord->getTimestamp();
-                           auto str = ts.to_string(utility::datetime::ISO_8601);
-                           common::time64_t resp_time;
-                           if (make_timestamp(str, &resp_time)) {
-                             auto diff = resp_time - dt.timestamp;
-                             auto ldiff = answ_time - cur_time;
-                             INFO_LOG() << "Symbol " << dt.symbol << " exec: " << diff << " latency: " << ldiff;
-                           }
-                         })
-                         .wait();
+    auto than_task = task.then([dt, nonce](std::shared_ptr<io::swagger::client::api::Order> ord) {
+      common::time64_t answ_time = common::time::current_utc_mstime();
+      auto ts = ord->getTimestamp();
+      auto str = ts.to_string(utility::datetime::ISO_8601);
+      common::time64_t resp_time;
+      if (make_timestamp(str, &resp_time)) {
+        auto diff = resp_time - dt.timestamp;
+        auto ldiff = answ_time - nonce;
+        INFO_LOG() << "symbol: " << dt.symbol << ", nonce: " << nonce << " exec: " << diff << ", latency: " << ldiff;
+      }
+    });
+    than_task.wait();
   } catch (const io::swagger::client::api::ApiException& aex) {
     auto ct = aex.getContent();
     char ch[256];
     ct->getline(ch, 256);
-    WARNING_LOG() << ch;
+    WARNING_LOG() << "rest error: " << ch;
   } catch (const web::websockets::client::websocket_exception& e) {
-    WARNING_LOG() << e.what();
+    WARNING_LOG() << "rest error: " << e.what();
   }
 
   fflush(stdout);
 }
 
+void Client::Stop() {
+  stop_ = true;
+}
+
 void Client::Run() {
+  auto uri = make_uri(symbol_);
   try {
-    auto conn_task = ws_.connect(make_uri(symbol_));
+    auto conn_task = ws_.connect(uri);
     conn_task.wait();
-    while (true) {
+    while (!stop_) {
       auto recv = ws_.receive();
       auto msg = recv.then(
           [](const web::websockets::client::websocket_incoming_message& in_msg) { return in_msg.extract_string(); });
-      msg.then([this](const std::string& msg) {
-           if (msg.empty()) {
-             return;
-           }
+      auto msg2 = msg.then([this](const std::string& msg) {
+        if (msg.empty()) {
+          return;
+        }
 
-           // INFO_LOG() << msg;
-           const char* msg_ptr = msg.c_str();
-           json_object* parsed = json_tokener_parse(msg_ptr);
-           if (!parsed) {
-             return;
-           }
+        // INFO_LOG() << msg;
+        const char* msg_ptr = msg.c_str();
+        json_object* parsed = json_tokener_parse(msg_ptr);
+        if (!parsed) {
+          return;
+        }
 
-           json_object* jaction = NULL;
-           bool jjaction_exist = json_object_object_get_ex(parsed, ACTION, &jaction);
-           if (!jjaction_exist) {
-             json_object_put(parsed);
-             return;
-           }
+        json_object* jaction = NULL;
+        bool jjaction_exist = json_object_object_get_ex(parsed, ACTION, &jaction);
+        if (!jjaction_exist) {
+          json_object_put(parsed);
+          return;
+        }
 
-           handle_action(json_object_get_string(jaction), parsed);
-
-           json_object_put(parsed);
-         })
-          .wait();
+        handle_action(json_object_get_string(jaction), parsed);
+        json_object_put(parsed);
+      });
+      msg2.wait();
     }
 
   } catch (const web::websockets::client::websocket_exception& e) {
-    WARNING_LOG() << e.what();
+    WARNING_LOG() << "websocket error: " << e.what();
   }
-
   ws_.close();
+
+  if (observer_) {
+    observer_->Finished();
+  }
 }
 
 web::uri Client::make_uri(const std::string& symbol) {

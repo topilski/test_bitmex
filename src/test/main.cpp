@@ -19,6 +19,16 @@ class HandlerData : public Client::ClientObserver {
       : xbtusd_client_(nullptr), xbtu18_client_(nullptr), public_key_(public_key), secret_key_(secret_key) {}
   virtual ~HandlerData() {}
 
+  virtual void Finished() {
+    if (xbtusd_client_) {
+      xbtusd_client_->Stop();
+    }
+
+    if (xbtu18_client_) {
+      xbtu18_client_->Stop();
+    }
+  }
+
   virtual void Notify(Client* client, const std::string& key) override {
     UNUSED(client);
     if (key != QUOTE) {
@@ -42,11 +52,12 @@ class HandlerData : public Client::ClientObserver {
         std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
           xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
         });
-        th1.join();
-        th2.join();
         xbtusd_client_->ClearData(key);
         xbtu18_client_->ClearData(key);
+        th1.join();
+        th2.join();
       }
+      INFO_LOG() << "diff: " << diff;
     }
   }
 

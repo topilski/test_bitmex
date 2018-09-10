@@ -24,6 +24,7 @@ class Client {
   class ClientObserver {
    public:
     virtual void Notify(Client* client, const std::string& key) = 0;
+    virtual void Finished() = 0;
   };
 
   Client(const web::websockets::client::websocket_client_config& cfg,
@@ -37,6 +38,7 @@ class Client {
   void ClearData(const std::string& key);
 
   void Run();
+  void Stop();
 
   const std::string& GetSymbol() const;
 
@@ -44,7 +46,7 @@ class Client {
                const std::string& secret_key,
                const data& dt,
                const std::string& side,
-               common::time64_t cur_time);
+               common::time64_t nonce);
 
  private:
   static web::uri make_uri(const std::string& symbol);
@@ -57,4 +59,6 @@ class Client {
   const std::string symbol_;
   web::websockets::client::websocket_client ws_;
   ClientObserver* observer_;
+
+  bool stop_;
 };
