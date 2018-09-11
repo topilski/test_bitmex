@@ -7,6 +7,8 @@
 
 #include <common/macros.h>
 
+#include <memory>
+
 #include "data.h"
 
 #define QUOTE "quote"
@@ -15,11 +17,9 @@
 #define SIDE_TYPE_BUY "Buy"
 #define SIDE_TYPE_SELL "Sell"
 
-typedef std::list<data> data_array_t;
-
 class Client {
  public:
-  typedef std::map<std::string, data_array_t> data_map_t;
+  typedef std::map<std::string, std::shared_ptr<data> > data_map_t;
 
   class ClientObserver {
    public:
@@ -33,7 +33,6 @@ class Client {
 
   ~Client();
 
-  data_array_t GetData(const std::string& key);
   bool GetLastData(const std::string& key, data* out);
   void ClearData(const std::string& key);
 

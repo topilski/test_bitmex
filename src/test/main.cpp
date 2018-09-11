@@ -116,8 +116,8 @@ class HandlerData : public Client::ClientObserver {
         }
       }
 
-      INFO_LOG() << "xbtusd_data.bid_price: " << xbtusd_data.bid_price
-                 << ", xbtu18_data.ask_price: " << xbtu18_data.ask_price << ", reverse: " << reverse_;
+      /*INFO_LOG() << "xbtusd_data.bid_price: " << xbtusd_data.bid_price
+                 << ", xbtu18_data.ask_price: " << xbtu18_data.ask_price << ", reverse: " << reverse_;*/
     }
   }
 

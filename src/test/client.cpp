@@ -31,6 +31,8 @@
 #define BASE_URL_REST_API "https://www.bitmex.com/api/v1"
 #define ORDER_PATH "/api/v1/order"
 
+typedef std::list<data> data_array_t;
+
 static const float kQuantity = 10.0;
 
 namespace {
@@ -101,16 +103,6 @@ Client::Client(const web::websockets::client::websocket_client_config& cfg,
 
 Client::~Client() {}
 
-data_array_t Client::GetData(const std::string& key) {
-  std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-  auto it = data_.find(key);
-  if (it == data_.end()) {
-    return data_array_t();
-  }
-
-  return it->second;
-}
-
 bool Client::GetLastData(const std::string& key, data* out) {
   std::lock_guard<std::recursive_mutex> lock(data_mutex_);
   auto it = data_.find(key);
@@ -118,12 +110,12 @@ bool Client::GetLastData(const std::string& key, data* out) {
     return false;
   }
 
-  if (it->second.empty()) {
+  if (!it->second) {
     return false;
   }
 
-  data d = it->second.back();
-  *out = d;
+  data* d = it->second.get();
+  *out = *d;
   return true;
 }
 
@@ -134,10 +126,11 @@ void Client::ClearData(const std::string& key) {
     return;
   }
 
-  if (it->second.empty()) {
+  if (!it->second) {
     return;
   }
-  it->second.clear();
+
+  it->second.reset();
 }
 
 const std::string& Client::GetSymbol() const {
@@ -290,14 +283,14 @@ void Client::handle_action(const char* action, json_object* obj) {
     data_array_t dt;
     if (parse_data(obj, &dt)) {
       std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-      data_[key] = dt;
+      data_[key] = std::make_shared<data>(dt.back());
       Update(key);
     }
   } else if (COMPARE_ACTION(action, ACTION_INSERT)) {
     data_array_t dt;
     if (parse_data(obj, &dt)) {
       std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-      data_[key] = dt;
+      data_[key] = std::make_shared<data>(dt.back());
       Update(key);
     }
   } else if (COMPARE_ACTION(action, ACTION_UPDATE)) {
