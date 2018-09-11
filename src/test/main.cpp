@@ -9,9 +9,9 @@
 #define XBTUSD "XBTUSD"
 #define XBTU18 "XBTU18"
 
-#define DIFF_1 5
+#define DIFF_1 50
 
-#define DIFF_2 3
+#define DIFF_2 40
 
 // short sell
 // long buy
