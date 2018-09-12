@@ -1,9 +1,5 @@
 #include <thread>
 
-#include <iostream>
-
-#include <common/time.h>
-
 #include "client.h"
 
 #define XBTUSD "XBTUSD"
@@ -12,6 +8,8 @@
 #define DIFF_1 50
 
 #define DIFF_2 40
+
+#define NONCE_DIFF 5
 
 // short sell
 // long buy
@@ -67,15 +65,15 @@ class HandlerData : public Client::ClientObserver {
       if (reverse_ != 2) {
         int diff = xbtusd_data->bid_price - xbtu18_data->ask_price;
         if (diff >= DIFF_1) {
-          common::time64_t cur_time = common::time::current_utc_mstime();
-          common::time64_t max_serv_time = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
-          common::time64_t nonce = std::max(cur_time, max_serv_time);
-          std::thread th1 = std::thread([this, xbtusd_data, nonce] {
+          common::time64_t nonce = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
+          auto cb1 = [this, xbtusd_data](common::time64_t nonce) {
             xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, nonce);
-          });
-          std::thread th2 = std::thread([this, xbtu18_data, nonce] {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, nonce + 5);
-          });
+          };
+          auto cb2 = [this, xbtu18_data](common::time64_t nonce) {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, nonce);
+          };
+          std::thread th1 = std::thread(cb1, nonce);
+          std::thread th2 = std::thread(cb2, nonce + NONCE_DIFF);
           xbtusd_client_->ClearData();
           xbtu18_client_->ClearData();
           reverse_ = 2;
@@ -89,15 +87,15 @@ class HandlerData : public Client::ClientObserver {
       if (reverse_ != 1) {
         int diff = xbtusd_data->ask_price - xbtu18_data->bid_price;
         if (diff <= DIFF_2) {
-          common::time64_t cur_time = common::time::current_utc_mstime();
-          common::time64_t max_serv_time = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
-          common::time64_t nonce = std::max(cur_time, max_serv_time);
-          std::thread th1 = std::thread([this, xbtusd_data, nonce] {
+          common::time64_t nonce = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
+          auto cb1 = [this, xbtusd_data](common::time64_t nonce) {
             xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, nonce);
-          });
-          std::thread th2 = std::thread([this, xbtu18_data, nonce] {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, nonce + 5);
-          });
+          };
+          auto cb2 = [this, xbtu18_data](common::time64_t nonce) {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, nonce);
+          };
+          std::thread th1 = std::thread(cb1, nonce);
+          std::thread th2 = std::thread(cb2, nonce + NONCE_DIFF);
           xbtusd_client_->ClearData();
           xbtu18_client_->ClearData();
           reverse_ = 1;

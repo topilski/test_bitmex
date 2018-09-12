@@ -38,7 +38,7 @@ class Client {
 
   const std::string& GetSymbol() const;
 
-  void DoOffer(const std::string& public_key,
+  bool DoOffer(const std::string& public_key,
                const std::string& secret_key,
                data_t dt,
                const std::string& side,

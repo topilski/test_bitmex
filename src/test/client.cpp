@@ -108,14 +108,14 @@ const std::string& Client::GetSymbol() const {
   return symbol_;
 }
 
-void Client::DoOffer(const std::string& public_key,
+bool Client::DoOffer(const std::string& public_key,
                      const std::string& secret_key,
                      data_t dt,
                      const std::string& side,
                      common::time64_t nonce) {
   if (dt->symbol != symbol_ || !dt) {
     NOTREACHED();
-    return;
+    return false;
   }
 
   try {
@@ -165,13 +165,16 @@ void Client::DoOffer(const std::string& public_key,
       }
     });
     than_task.wait();
+    return true;
   } catch (const io::swagger::client::api::ApiException& aex) {
     auto ct = aex.getContent();
     char ch[256];
     ct->getline(ch, 256);
     WARNING_LOG() << "rest error: " << ch;
+    return false;
   } catch (const web::websockets::client::websocket_exception& e) {
     WARNING_LOG() << "rest error: " << e.what();
+    return false;
   }
 }
 
