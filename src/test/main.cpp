@@ -1,3 +1,4 @@
+#include <future>
 #include <thread>
 
 #include "client.h"
@@ -9,7 +10,8 @@
 
 #define DIFF_2 40
 
-#define NONCE_DIFF 5
+#define RETRY_COUNT 5
+#define NONCE_DIFF 1
 
 // short sell
 // long buy
@@ -67,19 +69,25 @@ class HandlerData : public Client::ClientObserver {
         if (diff >= DIFF_1) {
           common::time64_t nonce = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
           auto cb1 = [this, xbtusd_data](common::time64_t nonce) {
-            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, nonce);
+            return xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, nonce);
           };
           auto cb2 = [this, xbtu18_data](common::time64_t nonce) {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, nonce);
+            return xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, nonce);
           };
-          std::thread th1 = std::thread(cb1, nonce);
-          std::thread th2 = std::thread(cb2, nonce + NONCE_DIFF);
+          std::future<bool> th1 = std::async(std::launch::async, cb1, nonce);
+          std::future<bool> th2 = std::async(std::launch::async, cb2, nonce + NONCE_DIFF);
           xbtusd_client_->ClearData();
           xbtu18_client_->ClearData();
-          reverse_ = 2;
-          th1.join();
-          th2.join();
-          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
+          th1.wait();
+          th2.wait();
+          bool result = th1.get();
+          result &= th2.get();
+          if (result) {
+            reverse_ = 2;
+          } else {
+            usleep(500000);
+          }
+          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_ << ", result: " << result;
           return;
         }
       }
@@ -89,19 +97,27 @@ class HandlerData : public Client::ClientObserver {
         if (diff <= DIFF_2) {
           common::time64_t nonce = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
           auto cb1 = [this, xbtusd_data](common::time64_t nonce) {
-            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, nonce);
+            return xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, nonce);
           };
           auto cb2 = [this, xbtu18_data](common::time64_t nonce) {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, nonce);
+            return xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, nonce);
           };
-          std::thread th1 = std::thread(cb1, nonce);
-          std::thread th2 = std::thread(cb2, nonce + NONCE_DIFF);
           xbtusd_client_->ClearData();
           xbtu18_client_->ClearData();
-          reverse_ = 1;
-          th1.join();
-          th2.join();
-          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_;
+          std::future<bool> th1 = std::async(std::launch::async, cb1, nonce);
+          std::future<bool> th2 = std::async(std::launch::async, cb2, nonce + NONCE_DIFF);
+          xbtusd_client_->ClearData();
+          xbtu18_client_->ClearData();
+          th1.wait();
+          th2.wait();
+          bool result = th1.get();
+          result &= th2.get();
+          if (result) {
+            reverse_ = 1;
+          } else {
+            usleep(500000);
+          }
+          INFO_LOG() << "diff: " << diff << ", reverse: " << reverse_ << ", result: " << result;
           return;
         }
       }
