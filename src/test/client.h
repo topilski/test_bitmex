@@ -1,8 +1,5 @@
 #pragma once
 
-#include <list>
-#include <mutex>
-
 #include <cpprest/ws_client.h>
 
 #include <common/macros.h>
@@ -17,10 +14,10 @@
 #define SIDE_TYPE_BUY "Buy"
 #define SIDE_TYPE_SELL "Sell"
 
+typedef std::shared_ptr<data> data_t;
+
 class Client {
  public:
-  typedef std::map<std::string, std::shared_ptr<data> > data_map_t;
-
   class ClientObserver {
    public:
     virtual void Notify(Client* client, const std::string& key) = 0;
@@ -33,8 +30,8 @@ class Client {
 
   ~Client();
 
-  bool GetLastData(const std::string& key, data* out);
-  void ClearData(const std::string& key);
+  data_t GetLastData() const;
+  void ClearData();
 
   void Run();
   void Stop();
@@ -43,7 +40,7 @@ class Client {
 
   void DoOffer(const std::string& public_key,
                const std::string& secret_key,
-               const data& dt,
+               data_t dt,
                const std::string& side,
                common::time64_t nonce);
 
@@ -53,8 +50,7 @@ class Client {
   void Update(const std::string& key);
 
   DISALLOW_COPY_AND_ASSIGN(Client);
-  std::recursive_mutex data_mutex_;
-  data_map_t data_;
+  data_t last_data_;
   const std::string symbol_;
   web::websockets::client::websocket_client ws_;
   ClientObserver* observer_;

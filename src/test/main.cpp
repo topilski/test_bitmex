@@ -37,7 +37,6 @@ class HandlerData : public Client::ClientObserver {
         xbtu18_client_(nullptr),
         public_key_(public_key),
         secret_key_(secret_key),
-        last_order_time_(0),
         reverse_(0) {}
   virtual ~HandlerData() {}
 
@@ -62,31 +61,23 @@ class HandlerData : public Client::ClientObserver {
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    /*common::time64_t lstime = common::time::current_utc_mstime();
-    auto skip_time = lstime - last_order_time_;
-    if (skip_time < FREEZE_TIME_MSEC) {
-      xbtusd_client_->ClearData(key);
-      xbtu18_client_->ClearData(key);
-      INFO_LOG() << "skip request: " << skip_time;
-      return;
-    }*/
-
-    data xbtu18_data;
-    data xbtusd_data;
-    if (xbtusd_client_->GetLastData(key, &xbtusd_data) && xbtu18_client_->GetLastData(key, &xbtu18_data)) {
+    data_t xbtu18_data = xbtu18_client_->GetLastData();
+    data_t xbtusd_data = xbtusd_client_->GetLastData();
+    if (xbtu18_data && xbtusd_data) {
       if (reverse_ != 2) {
-        int diff = xbtusd_data.bid_price - xbtu18_data.ask_price;
+        int diff = xbtusd_data->bid_price - xbtu18_data->ask_price;
         if (diff >= DIFF_1) {
           common::time64_t cur_time = common::time::current_utc_mstime();
-          std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
-            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, cur_time);
+          common::time64_t max_serv_time = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
+          common::time64_t nonce = std::max(cur_time, max_serv_time);
+          std::thread th1 = std::thread([this, xbtusd_data, nonce] {
+            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_SELL, nonce);
           });
-          std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, cur_time + 5);
+          std::thread th2 = std::thread([this, xbtu18_data, nonce] {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_BUY, nonce + 5);
           });
-          xbtusd_client_->ClearData(key);
-          xbtu18_client_->ClearData(key);
-          last_order_time_ = common::time::current_utc_mstime();
+          xbtusd_client_->ClearData();
+          xbtu18_client_->ClearData();
           reverse_ = 2;
           th1.join();
           th2.join();
@@ -96,18 +87,19 @@ class HandlerData : public Client::ClientObserver {
       }
 
       if (reverse_ != 1) {
-        int diff = xbtusd_data.ask_price - xbtu18_data.bid_price;
+        int diff = xbtusd_data->ask_price - xbtu18_data->bid_price;
         if (diff <= DIFF_2) {
           common::time64_t cur_time = common::time::current_utc_mstime();
-          std::thread th1 = std::thread([this, xbtusd_data, cur_time] {
-            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, cur_time);
+          common::time64_t max_serv_time = std::max(xbtusd_data->timestamp, xbtu18_data->timestamp);
+          common::time64_t nonce = std::max(cur_time, max_serv_time);
+          std::thread th1 = std::thread([this, xbtusd_data, nonce] {
+            xbtusd_client_->DoOffer(public_key_, secret_key_, xbtusd_data, SIDE_TYPE_BUY, nonce);
           });
-          std::thread th2 = std::thread([this, xbtu18_data, cur_time] {
-            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, cur_time + 5);
+          std::thread th2 = std::thread([this, xbtu18_data, nonce] {
+            xbtu18_client_->DoOffer(public_key_, secret_key_, xbtu18_data, SIDE_TYPE_SELL, nonce + 5);
           });
-          xbtusd_client_->ClearData(key);
-          xbtu18_client_->ClearData(key);
-          last_order_time_ = common::time::current_utc_mstime();
+          xbtusd_client_->ClearData();
+          xbtu18_client_->ClearData();
           reverse_ = 1;
           th1.join();
           th2.join();
@@ -138,7 +130,6 @@ class HandlerData : public Client::ClientObserver {
   std::mutex mutex_;
   const std::string public_key_;
   const std::string secret_key_;
-  common::time64_t last_order_time_;
 
   int reverse_;
 };

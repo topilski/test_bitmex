@@ -31,8 +31,6 @@
 #define BASE_URL_REST_API "https://www.bitmex.com/api/v1"
 #define ORDER_PATH "/api/v1/order"
 
-typedef std::list<data> data_array_t;
-
 static const float kQuantity = 10.0;
 
 namespace {
@@ -58,7 +56,7 @@ std::string gen_signature(const std::string& message, const std::string& secret)
   return hash_sha256_hex;
 }
 
-bool parse_data(json_object* obj, data_array_t* out) {
+bool parse_data(json_object* obj, data* out) {
   json_object* jdata = NULL;
   bool jdata_exist = json_object_object_get_ex(obj, DATA, &jdata);
   if (!jdata_exist) {
@@ -70,27 +68,22 @@ bool parse_data(json_object* obj, data_array_t* out) {
     return false;
   }
 
-  data_array_t dt;
   size_t len = json_object_array_length(jdata);
   if (len == 0) {
     return false;
   }
 
-  for (size_t i = 0; i < len; ++i) {
-    json_object* jdata_item = json_object_array_get_idx(jdata, i);
-    if (!jdata_item) {
-      return false;
-    }
-
-    data d;
-    if (!make_data(jdata_item, &d)) {
-      return false;
-    }
-    dt.push_back(d);
+  json_object* jdata_item = json_object_array_get_idx(jdata, len - 1);
+  if (!jdata_item) {
+    return false;
   }
 
-  DCHECK(!dt.empty());
-  *out = dt;
+  data d;
+  if (!make_data(jdata_item, &d)) {
+    return false;
+  }
+
+  *out = d;
   return true;
 }
 
@@ -99,38 +92,16 @@ bool parse_data(json_object* obj, data_array_t* out) {
 Client::Client(const web::websockets::client::websocket_client_config& cfg,
                const std::string& symbol,
                ClientObserver* observer)
-    : data_mutex_(), data_(), symbol_(symbol), ws_(cfg), observer_(observer), stop_(false) {}
+    : last_data_(), symbol_(symbol), ws_(cfg), observer_(observer), stop_(false) {}
 
 Client::~Client() {}
 
-bool Client::GetLastData(const std::string& key, data* out) {
-  std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-  auto it = data_.find(key);
-  if (it == data_.end()) {
-    return false;
-  }
-
-  if (!it->second) {
-    return false;
-  }
-
-  data* d = it->second.get();
-  *out = *d;
-  return true;
+data_t Client::GetLastData() const {
+  return last_data_;
 }
 
-void Client::ClearData(const std::string& key) {
-  std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-  auto it = data_.find(key);
-  if (it == data_.end()) {
-    return;
-  }
-
-  if (!it->second) {
-    return;
-  }
-
-  it->second.reset();
+void Client::ClearData() {
+  last_data_.reset();
 }
 
 const std::string& Client::GetSymbol() const {
@@ -139,11 +110,12 @@ const std::string& Client::GetSymbol() const {
 
 void Client::DoOffer(const std::string& public_key,
                      const std::string& secret_key,
-                     const data& dt,
+                     data_t dt,
                      const std::string& side,
                      common::time64_t nonce) {
-  if (dt.symbol != symbol_) {
+  if (dt->symbol != symbol_ || !dt) {
     NOTREACHED();
+    return;
   }
 
   try {
@@ -152,9 +124,9 @@ void Client::DoOffer(const std::string& public_key,
     conf->setApiKey("api-key", public_key);
     std::string cur_time_str = common::ConvertToString(nonce);
     conf->setApiKey("api-nonce", cur_time_str);
-    std::string data_str = common::MemSPrintf(
-        "{\"ordType\":\"Market\",\"orderQty\":\"%.6f\",\"side\":\"%s\",\"symbol\":\"%s\"}", kQuantity, side, dt.symbol);
-    std::string message = "POST" + std::string(ORDER_PATH) + cur_time_str + data_str;
+    std::string message = common::MemSPrintf(
+        "POST" ORDER_PATH "%s{\"ordType\":\"Market\",\"orderQty\":\"%.6f\",\"side\":\"%s\",\"symbol\":\"%s\"}",
+        cur_time_str, kQuantity, side, dt->symbol);
 
     /*verb = 'POST'
     path = '/api/v1/order'
@@ -174,21 +146,22 @@ void Client::DoOffer(const std::string& public_key,
     conf->setHttpConfig(hconf);
     std::shared_ptr<io::swagger::client::api::ApiClient> cl(new io::swagger::client::api::ApiClient(conf));
     io::swagger::client::api::OrderApi order(cl);
+    common::time64_t cur_time = common::time::current_utc_mstime();
     auto task = order.order_new(
-        dt.symbol, side, boost::optional<double>(), kQuantity, boost::optional<double>(), boost::optional<double>(),
+        dt->symbol, side, boost::optional<double>(), kQuantity, boost::optional<double>(), boost::optional<double>(),
         boost::optional<double>(), boost::optional<utility::string_t>(), boost::optional<utility::string_t>(),
         boost::optional<double>(), boost::optional<utility::string_t>(), utility::string_t("Market"),
         boost::optional<utility::string_t>(), boost::optional<utility::string_t>(),
         boost::optional<utility::string_t>(), boost::optional<utility::string_t>());
-    auto than_task = task.then([dt, nonce](std::shared_ptr<io::swagger::client::api::Order> ord) {
+    auto than_task = task.then([dt, nonce, cur_time](std::shared_ptr<io::swagger::client::api::Order> ord) {
       common::time64_t answ_time = common::time::current_utc_mstime();
       auto ts = ord->getTimestamp();
       auto str = ts.to_string(utility::datetime::ISO_8601);
       common::time64_t resp_time;
       if (make_timestamp(str, &resp_time)) {
-        auto diff = resp_time - dt.timestamp;
-        auto ldiff = answ_time - nonce;
-        INFO_LOG() << "symbol: " << dt.symbol << ", nonce: " << nonce << " exec: " << diff << ", latency: " << ldiff;
+        auto diff = resp_time - dt->timestamp;
+        auto ldiff = answ_time - cur_time;
+        INFO_LOG() << "symbol: " << dt->symbol << ", nonce: " << nonce << " exec: " << diff << ", latency: " << ldiff;
       }
     });
     than_task.wait();
@@ -280,26 +253,24 @@ void Client::handle_action(const char* action, json_object* obj) {
   if (COMPARE_ACTION(action, ACTION_PARTIAL)) {
     /*{"table":"quote","action":"partial","keys":[],"types":{"timestamp":"timestamp","symbol":"symbol","bidSize":"long","bidPrice":"float","askPrice":"float","askSize":"long"},"foreignKeys":{"symbol":"instrument"},"attributes":{"timestamp":"sorted","symbol":"grouped"},"filter":{"symbol":"XBTU18"},"data":[{"timestamp":"2018-09-04T17:34:10.448Z","symbol":"XBTU18","bidSize":5435,"bidPrice":7367.5,"askPrice":7368,"askSize":184546}]}*/
 
-    data_array_t dt;
+    data dt;
     if (parse_data(obj, &dt)) {
-      std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-      data_[key] = std::make_shared<data>(dt.back());
+      last_data_ = std::make_shared<data>(dt);
       Update(key);
     }
   } else if (COMPARE_ACTION(action, ACTION_INSERT)) {
-    data_array_t dt;
+    data dt;
     if (parse_data(obj, &dt)) {
-      std::lock_guard<std::recursive_mutex> lock(data_mutex_);
-      data_[key] = std::make_shared<data>(dt.back());
+      last_data_ = std::make_shared<data>(dt);
       Update(key);
     }
   } else if (COMPARE_ACTION(action, ACTION_UPDATE)) {
-    data_array_t dt;
+    data dt;
     if (parse_data(obj, &dt)) {
       Update(key);
     }
   } else if (COMPARE_ACTION(action, ACTION_DELETE)) {
-    data_array_t dt;
+    data dt;
     if (parse_data(obj, &dt)) {
       Update(key);
     }
